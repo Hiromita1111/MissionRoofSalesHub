@@ -227,7 +227,6 @@ const CH_ICONS = ["💰","🏆","🚀","🤝","🔥","📞","🎯","💪","⭐",
 const CH_COLORS = ["#4F8CFF","#00E676","#FF9F43","#A78BFA","#22D3EE","#FF6B6B","#FFD93D"];
 const grads = ["linear-gradient(135deg,#4F8CFF,#00E676)","linear-gradient(135deg,#FF9F43,#FFD93D)","linear-gradient(135deg,#A78BFA,#EC4899)","linear-gradient(135deg,#22D3EE,#4F8CFF)","linear-gradient(135deg,#FF6B6B,#FF9F43)","linear-gradient(135deg,#00E676,#22D3EE)"];
 const STATUSES = [["in_progress","In Progress"],["pay1","Pay 1"],["pay2","Pay 2"],["paid","Paid"],["complete","Complete"]];
-const PA_RATE = 0.10; // public adjuster fee on insurance jobs
 
 let DATA = { team: [], challenges: [] };
 let AUTH = null; // { pin, role, uid }
@@ -242,6 +241,7 @@ function migrate(d) {
     if (j.jobType !== "insurance" && j.jobType !== "retail") j.jobType = "retail";
     if (typeof j.dedAmount !== "number") j.dedAmount = 0;
     j.dedCollected = !!j.dedCollected;
+    if (!Array.isArray(j.checks)) j.checks = [];
   }));
   return d;
 }
@@ -310,16 +310,15 @@ let MF = {}; // active modal form fields
 
 // ─── Calculation helpers ─────────────────────────────────────────────────────
 function jobNet(job) {
-  const paFee = job.jobType === "insurance" ? job.gross * PA_RATE : 0;
-  return { paFee, netProfit: job.gross - paFee - job.costs - job.overhead };
+  return { netProfit: job.gross - job.costs - job.overhead };
 }
 function calcJob(job, tier) {
-  const { paFee, netProfit } = jobNet(job);
+  const { netProfit } = jobNet(job);
   const rate = tier === "top" ? 0.50 : 0.30;
   const commission = Math.max(0, netProfit * rate);
   const pay1 = job.gross * 0.07;
   const pay2 = Math.max(0, commission - pay1);
-  return { paFee, netProfit, commission, pay1, pay2, rate };
+  return { netProfit, commission, pay1, pay2, rate };
 }
 function calcOverride(team, managerId) {
   let total = 0;
@@ -417,11 +416,19 @@ const A = {
     if (!A.canEditJobs(repId)) { toast("You can only update your own jobs"); return; }
     const m = DATA.team.find(x => x.id === repId);
     const j = jobId ? m.jobs.find(x => x.id === jobId) : null;
-    MF = j ? { client: j.client, gross: j.gross, costs: j.costs, overhead: j.overhead, status: j.status, jobType: j.jobType, dedCollected: j.dedCollected, dedAmount: j.dedAmount || "" }
-           : { client: "", gross: "", costs: "", overhead: "", status: "in_progress", jobType: "insurance", dedCollected: false, dedAmount: "" };
+    MF = j ? { client: j.client, gross: j.gross, costs: j.costs, overhead: j.overhead, status: j.status, jobType: j.jobType, dedCollected: j.dedCollected, dedAmount: j.dedAmount || "", checks: [0,1,2].map(i => (j.checks && j.checks[i]) || "") }
+           : { client: "", gross: "", costs: "", overhead: "", status: "in_progress", jobType: "insurance", dedCollected: false, dedAmount: "", checks: ["", "", ""] };
     S.modal = { kind: "job", repId, id: jobId || null }; render();
   },
   setJobType(t) { MF.jobType = t; render(); },
+  setCheck(i, v) {
+    MF.checks[i] = v;
+    const sum = MF.checks.reduce((a, b) => a + num(b), 0);
+    const g = document.getElementById("gross-inp");
+    if (g) { if (sum > 0) { g.value = sum; g.readOnly = true; } else { g.readOnly = false; } }
+    const lbl = document.getElementById("gross-note");
+    if (lbl) lbl.textContent = sum > 0 ? "Cumulative gross = total of checks" : "Enter checks below, or type gross manually";
+  },
   toggleDed() { MF.dedCollected = !MF.dedCollected; render(); },
   saveJob() {
     if (!A.canEditJobs(S.modal.repId)) { toast("You can only update your own jobs"); return; }
@@ -429,7 +436,9 @@ const A = {
     if (!client) { toast("Enter a client name"); return; }
     const m = DATA.team.find(x => x.id === S.modal.repId);
     const ins = MF.jobType === "insurance";
-    const fields = { client, gross: num(MF.gross), costs: num(MF.costs), overhead: num(MF.overhead), status: MF.status,
+    const checks = MF.checks.map(num);
+    const checkSum = checks.reduce((a, b) => a + b, 0);
+    const fields = { client, gross: checkSum > 0 ? checkSum : num(MF.gross), checks, costs: num(MF.costs), overhead: num(MF.overhead), status: MF.status,
       jobType: ins ? "insurance" : "retail", dedCollected: ins ? !!MF.dedCollected : false, dedAmount: ins ? num(MF.dedAmount) : 0 };
     if (S.modal.id) Object.assign(m.jobs.find(x => x.id === S.modal.id), fields);
     else m.jobs.push({ id: "J" + Date.now(), ...fields });
@@ -584,7 +593,6 @@ function jobRow(j, tier, cols, repName, editRepId) {
     <div><div style="font-weight:600;font-size:12px">${esc(j.client)}</div>${dedNote(j)}</div>
     <div><span class="tp ${j.jobType}">${j.jobType === "insurance" ? "INS" : "RET"}</span></div>
     <div style="font-family:'IBM Plex Mono',monospace;font-size:12px">${fmt(j.gross)}</div>
-    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--purple)">${c.paFee ? "−" + fmt(c.paFee) : "—"}</div>
     <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--t2)">${fmt(j.costs)}</div>
     <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--t3)">${fmt(j.overhead)}</div>
     <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--green);font-weight:600">${fmt(c.netProfit)}</div>
@@ -605,7 +613,7 @@ function CommissionsTab() {
 
   const myT = me ? memberTotals(me, team) : {};
   const tt = team.reduce((acc, m) => { const t = memberTotals(m, team); acc.gross += t.grossSales; acc.comm += t.totalEarnings; return acc; }, { gross: 0, comm: 0 });
-  const cols = isAdmin ? "110px 1fr 52px 85px 80px 80px 75px 85px 110px 88px" : "1fr 52px 85px 80px 80px 75px 85px 110px 88px 90px";
+  const cols = isAdmin ? "110px 1fr 52px 85px 80px 75px 85px 120px 88px" : "1fr 52px 85px 80px 75px 85px 120px 88px 90px";
   const jobs = (isAdmin
     ? team.flatMap(m => m.jobs.map(j => ({ ...j, rep: m.name, tier: m.tier })))
     : me.jobs.map(j => ({ ...j, tier: me.tier }))
@@ -649,7 +657,7 @@ function CommissionsTab() {
       ${!isAdmin ? `<button class="act-btn" onclick="A.openJob(${me.id})">+ Add Job</button>` : ""}
     </div>
     ${isAdmin ? `<div class="adm-ban"><span>🔒</span>Admin View — All ${team.length} service providers</div>` : ""}
-    <div class="info-note">📋 <strong>How It Works:</strong> Top Roof Consultants earn <strong>50%</strong> of net profit. Roof Consultants earn <strong>30%</strong>. On <strong>insurance jobs</strong>, our public adjuster takes <strong>10% of gross</strong> first — so net profit = gross − 10% adjuster fee − costs − overhead. Retail jobs have no adjuster fee: net profit = gross − costs − overhead. All reps receive <strong>7% of gross as Payment 1</strong> when the first check hits the bank; the remaining balance is <strong>Payment 2</strong>, paid on job completion. Top Consultants also earn a <strong>2% override</strong> on managed reps' net profit.</div>
+    <div class="info-note">📋 <strong>How It Works:</strong> Top Roof Consultants earn <strong>50%</strong> of net profit. Roof Consultants earn <strong>30%</strong>. Net profit = gross − costs − overhead. Gross is the total of the checks received (the public adjuster's 10% is already taken out before checks reach us). All reps receive <strong>7% of gross as Payment 1</strong> when the first check hits the bank; the remaining balance is <strong>Payment 2</strong>, paid on job completion. Top Consultants also earn a <strong>2% override</strong> on managed reps' net profit.</div>
     ${dedOut.length ? `<div class="warn-ban"><span>⚠️</span>Outstanding deductibles: ${fmt(dedOutTotal)} not yet collected across ${dedOut.length} job${dedOut.length === 1 ? "" : "s"}</div>` : ""}
     <div class="cg">
       <div class="cb an"><div class="cb-l">${isAdmin ? "Total Team Earnings" : "Your Total Earnings"}</div><div class="cb-v">${fmt(isAdmin ? tt.comm : myT.totalEarnings || 0)}</div><div class="cb-s">${isAdmin ? team.length + " service providers" : me.jobs.length + " jobs · " + (me.tier === "top" ? "Top Consultant" : "Consultant")}</div></div>
@@ -659,21 +667,21 @@ function CommissionsTab() {
       <div class="ti ${!isAdmin && me.tier === "top" ? "active" : ""}">
         <div class="ti-name" style="color:${!isAdmin && me.tier === "top" ? "var(--accent)" : "var(--t3)"}">⭐ Top Roof Consultant</div>
         <div class="ti-rate" style="color:${!isAdmin && me.tier === "top" ? "var(--accent)" : "var(--t1)"}">50%</div>
-        <div class="ti-desc">of Net Profit (Gross − PA fee on insurance − Costs − Overhead)</div>
+        <div class="ti-desc">of Net Profit (Gross − Costs − Overhead)</div>
         <div class="ti-note">+ 7% of gross as Payment 1 when the first check hits the bank + 2% override on all managed consultants' net profit</div>
       </div>
       <div class="ti ${!isAdmin && me.tier === "consultant" ? "active" : ""}">
         <div class="ti-name" style="color:${!isAdmin && me.tier === "consultant" ? "var(--accent)" : "var(--t3)"}">🏠 Roof Consultant</div>
         <div class="ti-rate" style="color:${!isAdmin && me.tier === "consultant" ? "var(--accent)" : "var(--t1)"}">30%</div>
-        <div class="ti-desc">of Net Profit (Gross − PA fee on insurance − Costs − Overhead)</div>
+        <div class="ti-desc">of Net Profit (Gross − Costs − Overhead)</div>
         <div class="ti-note">+ 7% of gross as Payment 1 when the first check hits the bank. Balance (Payment 2) paid on job completion.</div>
       </div>
     </div>
     ${overrideBlock}
     <div class="box an" style="animation-delay:.24s">
       <div class="box-h"><div class="box-t">${isAdmin ? "All Jobs" : "My Jobs"}</div></div>
-      ${jobs.length ? `<div style="overflow-x:auto"><div style="min-width:${isAdmin ? 1020 : 1000}px">
-        <div class="th" style="grid-template-columns:${cols}">${isAdmin ? "<div>Rep</div>" : ""}<div>Client</div><div>Type</div><div>Gross</div><div>PA 10%</div><div>Costs</div><div>OH</div><div>Net Profit</div><div>Commission</div><div>Status</div>${!isAdmin ? "<div></div>" : ""}</div>
+      ${jobs.length ? `<div style="overflow-x:auto"><div style="min-width:${isAdmin ? 940 : 920}px">
+        <div class="th" style="grid-template-columns:${cols}">${isAdmin ? "<div>Rep</div>" : ""}<div>Client</div><div>Type</div><div>Gross</div><div>Costs</div><div>OH</div><div>Net Profit</div><div>Total Commission</div><div>Status</div>${!isAdmin ? "<div></div>" : ""}</div>
         ${jobs.map(j => jobRow(j, j.tier, cols, isAdmin ? j.rep : null, isAdmin ? null : me.id)).join("")}
       </div></div>` : `<div style="padding:28px;text-align:center;color:var(--t3);font-size:13px">No jobs yet${isAdmin ? " — add jobs from the Team tab" : " — click “+ Add Job” to log your first one"}.</div>`}
     </div>`;
@@ -693,7 +701,7 @@ function TeamTab() {
     ${team.length ? team.map((m, idx) => {
       const t = memberTotals(m, team);
       const mgr = m.managedBy ? team.find(x => x.id === m.managedBy) : null;
-      const jcols = "1fr 52px 85px 80px 80px 75px 85px 110px 88px 110px";
+      const jcols = "1fr 52px 85px 80px 75px 85px 120px 88px 110px";
       return `<div class="box rep-box an" style="animation-delay:${idx * .05}s">
         <div class="rep-head">
           <div class="lu">
@@ -709,8 +717,8 @@ function TeamTab() {
             <button class="mini-btn danger" onclick="A.deleteRep(${m.id})">✕ Remove</button>
           </div>
         </div>
-        ${m.jobs.length ? `<div style="overflow-x:auto"><div style="min-width:1020px">
-          <div class="th" style="grid-template-columns:${jcols}"><div>Client</div><div>Type</div><div>Gross</div><div>PA 10%</div><div>Costs</div><div>OH</div><div>Net Profit</div><div>Commission</div><div>Status</div><div></div></div>
+        ${m.jobs.length ? `<div style="overflow-x:auto"><div style="min-width:940px">
+          <div class="th" style="grid-template-columns:${jcols}"><div>Client</div><div>Type</div><div>Gross</div><div>Costs</div><div>OH</div><div>Net Profit</div><div>Total Commission</div><div>Status</div><div></div></div>
           ${m.jobs.map(j => {
             const c = calcJob(j, m.tier);
             const st = STATUSES.find(s => s[0] === j.status);
@@ -718,7 +726,6 @@ function TeamTab() {
               <div><div style="font-weight:600;font-size:12px">${esc(j.client)}</div>${dedNote(j)}</div>
               <div><span class="tp ${j.jobType}">${j.jobType === "insurance" ? "INS" : "RET"}</span></div>
               <div style="font-family:'IBM Plex Mono',monospace;font-size:12px">${fmt(j.gross)}</div>
-              <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--purple)">${c.paFee ? "−" + fmt(c.paFee) : "—"}</div>
               <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--t2)">${fmt(j.costs)}</div>
               <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--t3)">${fmt(j.overhead)}</div>
               <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--green);font-weight:600">${fmt(c.netProfit)}</div>
@@ -798,6 +805,7 @@ function JobModal() {
   const editing = !!S.modal.id;
   const rep = DATA.team.find(x => x.id === S.modal.repId);
   const ins = MF.jobType === "insurance";
+  const checkSum = MF.checks.reduce((a, b) => a + num(b), 0);
   return `<div class="modal-bg" onclick="A.closeModal()"><div class="modal" onclick="event.stopPropagation()">
     <div class="modal-t">${editing ? "Edit Job" : "Add Job"} — ${esc(rep.name)}</div>
     <div class="field"><label class="label">Client / Project</label><input class="inp" placeholder="e.g. Henderson Residence" value="${esc(MF.client)}" oninput="MF.client=this.value"></div>
@@ -805,11 +813,15 @@ function JobModal() {
       <button class="role-btn ${ins ? "on" : ""}" onclick="A.setJobType('insurance')">🛡 Insurance</button>
       <button class="role-btn ${!ins ? "on" : ""}" onclick="A.setJobType('retail')">🏷 Retail</button>
     </div>
-    ${ins ? '<div style="font-size:11px;color:var(--t3);margin-top:6px;line-height:1.4">Public adjuster fee of 10% of gross is deducted before net profit.</div>' : ""}</div>
+    </div>
     <div class="fr">
-      <div class="field"><label class="label">Gross ($)</label><input class="inp" type="number" min="0" step="any" placeholder="0" value="${esc(MF.gross)}" oninput="MF.gross=this.value"></div>
+      <div class="field"><label class="label">Gross ($)</label><input id="gross-inp" class="inp" type="number" min="0" step="any" placeholder="0" value="${esc(checkSum > 0 ? checkSum : MF.gross)}" ${checkSum > 0 ? "readonly" : ""} oninput="MF.gross=this.value"></div>
       <div class="field"><label class="label">Costs ($)</label><input class="inp" type="number" min="0" step="any" placeholder="0" value="${esc(MF.costs)}" oninput="MF.costs=this.value"></div>
       <div class="field"><label class="label">Overhead ($)</label><input class="inp" type="number" min="0" step="any" placeholder="0" value="${esc(MF.overhead)}" oninput="MF.overhead=this.value"></div>
+    </div>
+    <div class="field"><label class="label">Checks Received ($)</label>
+      <div class="fr">${[0,1,2].map(i => `<div class="field" style="margin-bottom:0"><input class="inp" type="number" min="0" step="any" placeholder="Check ${i + 1}" value="${esc(MF.checks[i])}" oninput="A.setCheck(${i},this.value)"></div>`).join("")}</div>
+      <div id="gross-note" style="font-size:11px;color:var(--t3);margin-top:6px;line-height:1.4">${checkSum > 0 ? "Cumulative gross = total of checks" : "Enter checks below, or type gross manually"}</div>
     </div>
     ${ins ? `<div class="fr">
       <div class="field"><label class="label">Deductible ($)</label><input class="inp" type="number" min="0" step="any" placeholder="0" value="${esc(MF.dedAmount)}" oninput="MF.dedAmount=this.value"></div>
