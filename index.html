@@ -183,6 +183,31 @@ body,html{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t1);
 .act-btn.danger:hover{background:rgba(255,107,107,.18);box-shadow:none}
 .act-btn.ghost{background:none;border:1px solid var(--bdr2);color:var(--t2)}
 .act-btn.ghost:hover{color:var(--t1);border-color:var(--t3);box-shadow:none}
+/* Payout stages */
+.stg{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:6px;font-size:10px;font-weight:800;letter-spacing:.4px;white-space:nowrap}
+.stg.none{background:rgba(148,163,184,.12);color:var(--t3)}
+.stg.p1{background:var(--orange-d);color:var(--orange)}
+.stg.p2{background:var(--cyan-d);color:var(--cyan)}
+.stg.full{background:var(--green-d);color:var(--green)}
+.stg-bar{display:flex;gap:3px;margin-top:5px;width:96px}
+.stg-bar span{flex:1;height:5px;border-radius:3px;background:var(--bdr2)}
+.stg-bar span.p1{background:var(--orange)}.stg-bar span.p2{background:var(--cyan)}.stg-bar span.full{background:var(--green)}
+.pay-box{border:1px solid var(--bdr2);border-radius:12px;padding:14px;margin-bottom:16px;background:rgba(255,255,255,.015)}
+.sw-row{display:flex;gap:8px;margin-bottom:12px}
+.sw{flex:1;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-radius:10px;border:1px solid var(--bdr2);background:var(--input);color:var(--t2);font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;transition:.2s}
+.sw:disabled{cursor:default;opacity:.85}
+.sw .knob{width:34px;height:18px;border-radius:99px;background:var(--bdr2);position:relative;flex-shrink:0;transition:.2s}
+.sw .knob::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:.2s}
+.sw.on .knob::after{left:18px}
+.sw.p1.on{border-color:var(--orange);color:var(--orange);background:var(--orange-d)}.sw.p1.on .knob{background:var(--orange)}
+.sw.p2.on{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-d)}.sw.p2.on .knob{background:var(--cyan)}
+.pay-lbl{font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px}
+.pay-hint{font-size:11px;color:var(--t3);margin-top:8px;line-height:1.5;font-family:'IBM Plex Mono',monospace}
+.pay-sum{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.pay-tile{background:var(--card);border:1px solid var(--bdr);border-radius:14px;padding:14px 16px;border-top:3px solid var(--c)}
+.pay-tile .v{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:var(--c)}
+.pay-tile .l{font-size:11px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-top:3px}
+@media(max-width:760px){.pay-sum{grid-template-columns:repeat(2,1fr)}}
 .mini-btn{padding:4px 9px;border-radius:6px;font-size:10px;font-weight:700;border:1px solid var(--bdr2);background:none;color:var(--t2);cursor:pointer;font-family:'DM Sans',sans-serif;transition:.2s}
 .mini-btn:hover{color:var(--t1);border-color:var(--t3)}
 .mini-btn.danger{color:var(--red);border-color:rgba(255,107,107,.3)}
@@ -242,6 +267,9 @@ function migrate(d) {
     if (typeof j.dedAmount !== "number") j.dedAmount = 0;
     j.dedCollected = !!j.dedCollected;
     if (!Array.isArray(j.checks)) j.checks = [];
+    if (typeof j.paidP1 !== "number") j.paidP1 = 0;
+    if (typeof j.paidP2 !== "number") j.paidP2 = 0;
+    j.p1Done = !!j.p1Done; j.p2Done = !!j.p2Done;
   }));
   return d;
 }
@@ -298,7 +326,7 @@ async function refresh(silent) {
 setInterval(() => refresh(true), 60000);
 
 // ─── Session ─────────────────────────────────────────────────────────────────
-const S = { authed: false, role: "user", uid: null, tab: "dashboard", sort: "totalEarnings", fl: "all", modal: null, busy: false };
+const S = { authed: false, role: "user", uid: null, tab: "dashboard", sort: "totalEarnings", fl: "all", modal: null, busy: false, payF: "all" };
 function saveSession() {
   try { sessionStorage.setItem("mrs-auth", JSON.stringify(AUTH ? { pin: AUTH.pin, tab: S.tab } : null)); } catch (e) {}
 }
@@ -319,6 +347,18 @@ function calcJob(job, tier) {
   const pay1 = job.gross * 0.07;
   const pay2 = Math.max(0, commission - pay1);
   return { netProfit, commission, pay1, pay2, rate };
+}
+function payStage(j) {
+  if (j.p2Done) return { k: "full", label: "PAID IN FULL" };
+  if (j.p1Done) return { k: "p1", label: "P1 ACV PAID" };
+  return { k: "none", label: "UNPAID" };
+}
+function payCell(j, c) {
+  const st = payStage(j);
+  const paid = (j.paidP1 || 0) + (j.paidP2 || 0);
+  return `<div><span class="stg ${st.k}">${st.label}</span>
+    <div class="stg-bar"><span class="${j.p1Done ? (j.p2Done ? "full" : "p1") : ""}"></span><span class="${j.p2Done ? "full" : ""}"></span></div>
+    <div style="font-size:9px;color:var(--t3);font-family:'IBM Plex Mono',monospace;margin-top:3px">${fmt(paid)} of ${fmt(c.commission)}</div></div>`;
 }
 function calcOverride(team, managerId) {
   let total = 0;
@@ -360,6 +400,7 @@ const A = {
   refresh() { refresh(false); },
   setTab(t) { S.tab = t; saveSession(); render(); window.scrollTo(0, 0); },
   setSort(k) { S.sort = k; render(); },
+  setPayF(k) { S.payF = k; render(); },
   setFl(f) { S.fl = f; render(); },
   closeModal() { S.modal = null; render(); },
 
@@ -416,11 +457,28 @@ const A = {
     if (!A.canEditJobs(repId)) { toast("You can only update your own jobs"); return; }
     const m = DATA.team.find(x => x.id === repId);
     const j = jobId ? m.jobs.find(x => x.id === jobId) : null;
-    MF = j ? { client: j.client, gross: j.gross, costs: j.costs, overhead: j.overhead, status: j.status, jobType: j.jobType, dedCollected: j.dedCollected, dedAmount: j.dedAmount || "", checks: [0,1,2].map(i => (j.checks && j.checks[i]) || "") }
-           : { client: "", gross: "", costs: "", overhead: "", status: "in_progress", jobType: "insurance", dedCollected: false, dedAmount: "", checks: ["", "", ""] };
+    MF = j ? { client: j.client, gross: j.gross, costs: j.costs, overhead: j.overhead, status: j.status, jobType: j.jobType, dedCollected: j.dedCollected, dedAmount: j.dedAmount || "", checks: [0,1,2].map(i => (j.checks && j.checks[i]) || ""), paidP1: j.paidP1 || "", paidP2: j.paidP2 || "", p1Done: j.p1Done, p2Done: j.p2Done }
+           : { client: "", gross: "", costs: "", overhead: "", status: "in_progress", jobType: "insurance", dedCollected: false, dedAmount: "", checks: ["", "", ""], paidP1: "", paidP2: "", p1Done: false, p2Done: false };
     S.modal = { kind: "job", repId, id: jobId || null }; render();
   },
   setJobType(t) { MF.jobType = t; render(); },
+  modalCalc() {
+    const m = DATA.team.find(x => x.id === S.modal.repId);
+    const sum = MF.checks.reduce((a, b) => a + num(b), 0);
+    return calcJob({ gross: sum > 0 ? sum : num(MF.gross), costs: num(MF.costs), overhead: num(MF.overhead) }, m.tier);
+  },
+  togglePay(k) {
+    if (S.role !== "admin") return;
+    const c = A.modalCalc();
+    if (k === "p1") { MF.p1Done = !MF.p1Done; if (MF.p1Done && !num(MF.paidP1)) MF.paidP1 = Math.round(c.pay1 * 100) / 100; if (!MF.p1Done) MF.p2Done = false; }
+    else { MF.p2Done = !MF.p2Done; if (MF.p2Done) { MF.p1Done = true; if (!num(MF.paidP2)) MF.paidP2 = Math.max(0, Math.round((c.commission - num(MF.paidP1)) * 100) / 100); } }
+    render();
+  },
+  setPaid(k, v) {
+    MF[k] = v;
+    const t = document.getElementById("paid-total");
+    if (t) t.value = fmt(num(MF.paidP1) + num(MF.paidP2));
+  },
   setCheck(i, v) {
     MF.checks[i] = v;
     const sum = MF.checks.reduce((a, b) => a + num(b), 0);
@@ -439,7 +497,7 @@ const A = {
     const checks = MF.checks.map(num);
     const checkSum = checks.reduce((a, b) => a + b, 0);
     const fields = { client, gross: checkSum > 0 ? checkSum : num(MF.gross), checks, costs: num(MF.costs), overhead: num(MF.overhead), status: MF.status,
-      jobType: ins ? "insurance" : "retail", dedCollected: ins ? !!MF.dedCollected : false, dedAmount: ins ? num(MF.dedAmount) : 0 };
+      jobType: ins ? "insurance" : "retail", paidP1: num(MF.paidP1), paidP2: num(MF.paidP2), p1Done: !!MF.p1Done, p2Done: !!MF.p2Done, dedCollected: ins ? !!MF.dedCollected : false, dedAmount: ins ? num(MF.dedAmount) : 0 };
     if (S.modal.id) Object.assign(m.jobs.find(x => x.id === S.modal.id), fields);
     else m.jobs.push({ id: "J" + Date.now(), ...fields });
     S.modal = null; render(); persist();
@@ -478,15 +536,28 @@ const A = {
 
 // ─── Views ───────────────────────────────────────────────────────────────────
 function memberTotals(member, team) {
-  let grossSales = 0, totalNet = 0, totalComm = 0;
+  let grossSales = 0, totalNet = 0, totalComm = 0, paidP1 = 0, paidP2 = 0;
   member.jobs.forEach(j => {
     const c = calcJob(j, member.tier);
     grossSales += j.gross; totalNet += c.netProfit; totalComm += c.commission;
+    paidP1 += j.paidP1 || 0; paidP2 += j.paidP2 || 0;
   });
   const override = member.tier === "top" ? calcOverride(team, member.id) : 0;
-  return { grossSales, totalNet, totalComm, override, totalEarnings: totalComm + override };
+  const paidTotal = paidP1 + paidP2;
+  return { grossSales, totalNet, totalComm, override, totalEarnings: totalComm + override, paidP1, paidP2, paidTotal, owed: Math.max(0, totalComm - paidTotal) };
 }
 
+function payTiles(t) {
+  return `<div class="pay-sum an" style="animation-delay:.2s">
+    <div class="pay-tile" style="--c:var(--orange)"><div class="v">${fmt(t.paidP1)}</div><div class="l">P1 · ACV Paid</div></div>
+    <div class="pay-tile" style="--c:var(--cyan)"><div class="v">${fmt(t.paidP2)}</div><div class="l">P2 · Final Paid</div></div>
+    <div class="pay-tile" style="--c:var(--green)"><div class="v">${fmt(t.paidTotal)}</div><div class="l">Total Commission Paid</div></div>
+    <div class="pay-tile" style="--c:var(--red)"><div class="v">${fmt(t.owed)}</div><div class="l">Balance Still Owed</div></div>
+  </div>`;
+}
+function sumTotals(members, team) {
+  return members.reduce((a, m) => { const t = memberTotals(m, team); a.paidP1 += t.paidP1; a.paidP2 += t.paidP2; a.paidTotal += t.paidTotal; a.owed += t.owed; return a; }, { paidP1: 0, paidP2: 0, paidTotal: 0, owed: 0 });
+}
 function statCard(s, i) {
   return `<div class="st an" style="animation-delay:${i * .06}s">
     <div class="st-top"><div class="st-ic" style="background:${s.bg}">${s.icon}</div><span class="st-tag" style="background:${s.bg};color:${s.tc}">${esc(s.tag)}</span></div>
@@ -554,6 +625,7 @@ function Dashboard() {
     </div>
     ${isAdmin ? '<div class="adm-ban"><span>🔒</span>Admin View — Full team data and management</div>' : ""}
     <div class="sg">${stats.map(statCard).join("")}</div>
+    ${payTiles(isAdmin ? sumTotals(team, team) : myT)}
     <div class="box an" style="animation-delay:.28s">
       <div class="box-h"><div class="box-t">${isAdmin ? "Team Rankings — Total Earnings" : "Where You Stand"}</div></div>
       ${sorted.map((m, i) => leaderRow(m, i, isAdmin ? -1 : S.uid)).join("")}
@@ -598,6 +670,7 @@ function jobRow(j, tier, cols, repName, editRepId) {
     <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--green);font-weight:600">${fmt(c.netProfit)}</div>
     <div><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700">${fmt(c.commission)}</div>
     <div style="font-size:9px;color:var(--t3);font-family:'IBM Plex Mono',monospace">P1 ${fmt(c.pay1)} · P2 ${fmt(c.pay2)}</div></div>
+    ${payCell(j, c)}
     <div><span class="sp ${j.status}">${st ? st[1] : j.status}</span></div>
     ${editRepId != null ? `<div><button class="mini-btn" onclick="A.openJob(${editRepId},'${j.id}')">✎ Update</button></div>` : ""}
   </div>`;
@@ -613,11 +686,12 @@ function CommissionsTab() {
 
   const myT = me ? memberTotals(me, team) : {};
   const tt = team.reduce((acc, m) => { const t = memberTotals(m, team); acc.gross += t.grossSales; acc.comm += t.totalEarnings; return acc; }, { gross: 0, comm: 0 });
-  const cols = isAdmin ? "110px 1fr 52px 85px 80px 75px 85px 120px 88px" : "1fr 52px 85px 80px 75px 85px 120px 88px 90px";
+  const cols = isAdmin ? "110px 1fr 52px 85px 80px 75px 85px 120px 120px 88px" : "1fr 52px 85px 80px 75px 85px 120px 120px 88px 90px";
   const jobs = (isAdmin
     ? team.flatMap(m => m.jobs.map(j => ({ ...j, rep: m.name, tier: m.tier })))
     : me.jobs.map(j => ({ ...j, tier: me.tier }))
-  ).sort((a, b) => b.gross - a.gross);
+  ).sort((a, b) => b.gross - a.gross).filter(j => S.payF === "all" || payStage(j).k === S.payF);
+  const payFilters = [["all","All","var(--accent)"],["none","Unpaid","var(--t3)"],["p1","P1 ACV Paid","var(--orange)"],["full","Paid in Full","var(--green)"]];
   const dedScope = isAdmin ? team.flatMap(m => m.jobs) : me.jobs;
   const dedOut = dedScope.filter(j => j.jobType === "insurance" && j.dedAmount > 0 && !j.dedCollected);
   const dedOutTotal = dedOut.reduce((s, j) => s + j.dedAmount, 0);
@@ -677,13 +751,15 @@ function CommissionsTab() {
         <div class="ti-note">+ 7% of gross as Payment 1 when the first check hits the bank. Balance (Payment 2) paid on job completion.</div>
       </div>
     </div>
+    ${payTiles(isAdmin ? sumTotals(team, team) : myT)}
     ${overrideBlock}
     <div class="box an" style="animation-delay:.24s">
-      <div class="box-h"><div class="box-t">${isAdmin ? "All Jobs" : "My Jobs"}</div></div>
-      ${jobs.length ? `<div style="overflow-x:auto"><div style="min-width:${isAdmin ? 940 : 920}px">
-        <div class="th" style="grid-template-columns:${cols}">${isAdmin ? "<div>Rep</div>" : ""}<div>Client</div><div>Type</div><div>Gross</div><div>Costs</div><div>OH</div><div>Net Profit</div><div>Total Commission</div><div>Status</div>${!isAdmin ? "<div></div>" : ""}</div>
+      <div class="box-h"><div class="box-t">${isAdmin ? "All Jobs" : "My Jobs"}</div>
+        <div class="pills">${payFilters.map(([k,l,c]) => `<button class="pb ${S.payF===k?"on":""}" style="${S.payF===k?`color:${c};border-color:${c}`:""}" onclick="A.setPayF('${k}')">${l}</button>`).join("")}</div></div>
+      ${jobs.length ? `<div style="overflow-x:auto"><div style="min-width:${isAdmin ? 1060 : 1040}px">
+        <div class="th" style="grid-template-columns:${cols}">${isAdmin ? "<div>Rep</div>" : ""}<div>Client</div><div>Type</div><div>Gross</div><div>Costs</div><div>OH</div><div>Net Profit</div><div>Total Commission</div><div>Paid Out</div><div>Status</div>${!isAdmin ? "<div></div>" : ""}</div>
         ${jobs.map(j => jobRow(j, j.tier, cols, isAdmin ? j.rep : null, isAdmin ? null : me.id)).join("")}
-      </div></div>` : `<div style="padding:28px;text-align:center;color:var(--t3);font-size:13px">No jobs yet${isAdmin ? " — add jobs from the Team tab" : " — click “+ Add Job” to log your first one"}.</div>`}
+      </div></div>` : `<div style="padding:28px;text-align:center;color:var(--t3);font-size:13px">${S.payF !== "all" ? "No jobs in this payout stage" : "No jobs yet" + (isAdmin ? " — add jobs from the Team tab" : " — click “+ Add Job” to log your first one")}.</div>`}
     </div>`;
 }
 
@@ -701,7 +777,7 @@ function TeamTab() {
     ${team.length ? team.map((m, idx) => {
       const t = memberTotals(m, team);
       const mgr = m.managedBy ? team.find(x => x.id === m.managedBy) : null;
-      const jcols = "1fr 52px 85px 80px 75px 85px 120px 88px 110px";
+      const jcols = "1fr 52px 85px 80px 75px 85px 120px 120px 88px 110px";
       return `<div class="box rep-box an" style="animation-delay:${idx * .05}s">
         <div class="rep-head">
           <div class="lu">
@@ -717,8 +793,8 @@ function TeamTab() {
             <button class="mini-btn danger" onclick="A.deleteRep(${m.id})">✕ Remove</button>
           </div>
         </div>
-        ${m.jobs.length ? `<div style="overflow-x:auto"><div style="min-width:940px">
-          <div class="th" style="grid-template-columns:${jcols}"><div>Client</div><div>Type</div><div>Gross</div><div>Costs</div><div>OH</div><div>Net Profit</div><div>Total Commission</div><div>Status</div><div></div></div>
+        ${m.jobs.length ? `<div style="overflow-x:auto"><div style="min-width:1060px">
+          <div class="th" style="grid-template-columns:${jcols}"><div>Client</div><div>Type</div><div>Gross</div><div>Costs</div><div>OH</div><div>Net Profit</div><div>Total Commission</div><div>Paid Out</div><div>Status</div><div></div></div>
           ${m.jobs.map(j => {
             const c = calcJob(j, m.tier);
             const st = STATUSES.find(s => s[0] === j.status);
@@ -731,6 +807,7 @@ function TeamTab() {
               <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--green);font-weight:600">${fmt(c.netProfit)}</div>
               <div><div style="font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700">${fmt(c.commission)}</div>
               <div style="font-size:9px;color:var(--t3);font-family:'IBM Plex Mono',monospace">P1 ${fmt(c.pay1)} · P2 ${fmt(c.pay2)}</div></div>
+              ${payCell(j, c)}
               <div><span class="sp ${j.status}">${st ? st[1] : j.status}</span></div>
               <div style="display:flex;gap:5px"><button class="mini-btn" onclick="A.openJob(${m.id},'${j.id}')">✎</button><button class="mini-btn danger" onclick="A.deleteJob(${m.id},'${j.id}')">✕</button></div>
             </div>`;
@@ -806,6 +883,8 @@ function JobModal() {
   const rep = DATA.team.find(x => x.id === S.modal.repId);
   const ins = MF.jobType === "insurance";
   const checkSum = MF.checks.reduce((a, b) => a + num(b), 0);
+  const adm = S.role === "admin";
+  const mc = A.modalCalc();
   return `<div class="modal-bg" onclick="A.closeModal()"><div class="modal" onclick="event.stopPropagation()">
     <div class="modal-t">${editing ? "Edit Job" : "Add Job"} — ${esc(rep.name)}</div>
     <div class="field"><label class="label">Client / Project</label><input class="inp" placeholder="e.g. Henderson Residence" value="${esc(MF.client)}" oninput="MF.client=this.value"></div>
@@ -830,6 +909,19 @@ function JobModal() {
         <button class="role-btn ${!MF.dedCollected ? "on" : ""}" onclick="if(MF.dedCollected)A.toggleDed()">✗ Not Yet</button>
       </div></div>
     </div>` : ""}
+    <div class="pay-box">
+      <label class="label" style="margin-bottom:10px">Commission Paid to Rep ${!adm ? '<span style="text-transform:none;letter-spacing:0;font-weight:600">— recorded by admin</span>' : ""}</label>
+      <div class="sw-row">
+        <button class="sw p1 ${MF.p1Done ? "on" : ""}" ${adm ? `onclick="A.togglePay('p1')"` : "disabled"}><span>P1 · ACV Paid</span><span class="knob"></span></button>
+        <button class="sw p2 ${MF.p2Done ? "on" : ""}" ${adm ? `onclick="A.togglePay('p2')"` : "disabled"}><span>P2 · Final Paid</span><span class="knob"></span></button>
+      </div>
+      <div class="fr">
+        <div class="field" style="margin-bottom:0"><div class="pay-lbl" style="color:var(--orange)">P1 · ACV ($)</div><input class="inp" type="number" min="0" step="any" placeholder="0" value="${esc(MF.paidP1)}" ${adm ? `oninput="A.setPaid('paidP1',this.value)"` : "readonly"}></div>
+        <div class="field" style="margin-bottom:0"><div class="pay-lbl" style="color:var(--cyan)">P2 · Final ($)</div><input class="inp" type="number" min="0" step="any" placeholder="0" value="${esc(MF.paidP2)}" ${adm ? `oninput="A.setPaid('paidP2',this.value)"` : "readonly"}></div>
+        <div class="field" style="margin-bottom:0"><div class="pay-lbl" style="color:var(--green)">Total Paid</div><input id="paid-total" class="inp" readonly style="color:var(--green);font-weight:700" value="${fmt(num(MF.paidP1) + num(MF.paidP2))}"></div>
+      </div>
+      <div class="pay-hint">Owed on this job: P1 ${fmt(mc.pay1)} · P2 ${fmt(mc.pay2)} · Total ${fmt(mc.commission)}</div>
+    </div>
     <div class="field"><label class="label">Status</label><select class="sel" onchange="MF.status=this.value">
       ${STATUSES.map(([k, l]) => `<option value="${k}" ${MF.status === k ? "selected" : ""}>${l}</option>`).join("")}
     </select></div>
